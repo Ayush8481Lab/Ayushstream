@@ -1,0 +1,16 @@
+{
+  "name": "gaana-search-api",
+  "version": "1.0.0",
+  "main": "api/index.ts",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }
+}
