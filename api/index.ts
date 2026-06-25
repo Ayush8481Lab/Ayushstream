@@ -1,14 +1,16 @@
 import { Hono } from 'hono'
+import { handle } from 'hono/vercel' // <-- CRITICAL: Brought this back
 import { cors } from 'hono/cors'
 import { z } from 'zod'
 
-// 1. Tell Vercel to use Edge Runtime (Fixes the crash)
+// Use Vercel Edge Runtime for maximum speed & no cold boots
 export const config = {
   runtime: 'edge',
 }
 
 const app = new Hono().basePath('/api')
 
+// Enable CORS
 app.use('/*', cors())
 
 const searchSchema = z.object({
@@ -29,7 +31,6 @@ app.get('/search/songs', async (c) => {
 
     const gaanaUrl = `https://gaana.com/apiv2?country=IN&startIndex=0&secType=track&type=search&keyword=${encodeURIComponent(q)}`
     
-    // 2. Added User-Agent so Gaana doesn't block Vercel IPs
     const response = await fetch(gaanaUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -52,5 +53,5 @@ app.get('/search/songs', async (c) => {
   }
 })
 
-// 3. Export the app directly (No handle wrapper needed for Edge)
-export default app
+// THIS LINE FIXES THE CRASH: Tell Vercel how to handle the app
+export default handle(app)
