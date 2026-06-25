@@ -1,12 +1,7 @@
 import { Hono } from 'hono'
-import { handle } from 'hono/vercel' // <-- CRITICAL: Brought this back
+import { handle } from 'hono/vercel'
 import { cors } from 'hono/cors'
 import { z } from 'zod'
-
-// Use Vercel Edge Runtime for maximum speed & no cold boots
-export const config = {
-  runtime: 'edge',
-}
 
 const app = new Hono().basePath('/api')
 
@@ -38,20 +33,30 @@ app.get('/search/songs', async (c) => {
       }
     })
 
+    // 1. Read as text first so it doesn't crash if Gaana returns an HTML error page
+    const responseText = await response.text()
+
     if (!response.ok) {
-      throw new Error(`Gaana API error: ${response.status}`)
+      return c.json({ 
+        success: false, 
+        error: `Gaana API returned Status ${response.status}`,
+        details: responseText.substring(0, 200) // Show a snippet of what Gaana responded with
+      }, 500)
     }
     
-    const data = await response.json()
+    // 2. Safely parse the JSON
+    const data = JSON.parse(responseText)
     const tracks = data.tracks && Array.isArray(data.tracks) ? data.tracks.slice(0, limit) : []
 
     return c.json({ success: true, data: tracks })
 
-  } catch (error) {
-    console.error('API Error:', error)
-    return c.json({ success: false, error: 'Internal Server Error' }, 500)
+  } catch (error: any) {
+    // 3. THIS WILL NOW SHOW US THE EXACT ERROR!
+    return c.json({ 
+      success: false, 
+      error: error.message || 'An unknown error occurred'
+    }, 500)
   }
 })
 
-// THIS LINE FIXES THE CRASH: Tell Vercel how to handle the app
 export default handle(app)
