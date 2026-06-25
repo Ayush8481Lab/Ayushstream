@@ -1,14 +1,16 @@
 import { Hono } from 'hono'
-import { handle } from 'hono/vercel'
 import { cors } from 'hono/cors'
 import { z } from 'zod'
 
+// 1. Tell Vercel to use Edge Runtime (Fixes the crash)
+export const config = {
+  runtime: 'edge',
+}
+
 const app = new Hono().basePath('/api')
 
-// Enable CORS so frontend apps can call your API
 app.use('/*', cors())
 
-// Validation Schema (z.coerce automatically converts "?limit=10" string to a number)
 const searchSchema = z.object({
   q: z.string().min(1, 'Search query is required'),
   limit: z.coerce.number().min(1).max(100).default(10)
@@ -16,7 +18,6 @@ const searchSchema = z.object({
 
 app.get('/search/songs', async (c) => {
   try {
-    // 1. Validate Input
     const query = c.req.query()
     const parsed = searchSchema.safeParse(query)
     
@@ -26,27 +27,30 @@ app.get('/search/songs', async (c) => {
 
     const { q, limit } = parsed.data
 
-    // 2. Fetch ONLY tracks from Gaana (Removed the Bhojpuri/startIndex bias)
     const gaanaUrl = `https://gaana.com/apiv2?country=IN&startIndex=0&secType=track&type=search&keyword=${encodeURIComponent(q)}`
     
-    const response = await fetch(gaanaUrl)
-    if (!response.ok) throw new Error('Gaana API responded with an error')
-    
-    const data = await response.json()
-
-    // 3. Format Response (Extracting tracks array, handling empty cases)
-    const tracks = data.tracks && Array.isArray(data.tracks) ? data.tracks.slice(0, limit) : []
-
-    return c.json({
-      success: true,
-      data: tracks
+    // 2. Added User-Agent so Gaana doesn't block Vercel IPs
+    const response = await fetch(gaanaUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json'
+      }
     })
 
+    if (!response.ok) {
+      throw new Error(`Gaana API error: ${response.status}`)
+    }
+    
+    const data = await response.json()
+    const tracks = data.tracks && Array.isArray(data.tracks) ? data.tracks.slice(0, limit) : []
+
+    return c.json({ success: true, data: tracks })
+
   } catch (error) {
-    console.error(error)
+    console.error('API Error:', error)
     return c.json({ success: false, error: 'Internal Server Error' }, 500)
   }
 })
 
-// Export for Vercel Serverless Function
-export default handle(app)
+// 3. Export the app directly (No handle wrapper needed for Edge)
+export default app
