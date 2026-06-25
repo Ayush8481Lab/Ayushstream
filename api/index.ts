@@ -3,9 +3,13 @@ import { handle } from 'hono/vercel'
 import { cors } from 'hono/cors'
 import { z } from 'zod'
 
+// 1. MUST BE EDGE: This prevents the Vercel Invocation Crash!
+export const config = {
+  runtime: 'edge',
+}
+
 const app = new Hono().basePath('/api')
 
-// Enable CORS
 app.use('/*', cors())
 
 const searchSchema = z.object({
@@ -26,37 +30,47 @@ app.get('/search/songs', async (c) => {
 
     const gaanaUrl = `https://gaana.com/apiv2?country=IN&startIndex=0&secType=track&type=search&keyword=${encodeURIComponent(q)}`
     
+    // Sometimes Gaana blocks Vercel. Adding extra headers helps bypass this.
     const response = await fetch(gaanaUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://gaana.com/'
       }
     })
 
-    // 1. Read as text first so it doesn't crash if Gaana returns an HTML error page
+    // Read the response as text first, so if Gaana blocks us we can see the HTML error page
     const responseText = await response.text()
 
     if (!response.ok) {
       return c.json({ 
         success: false, 
-        error: `Gaana API returned Status ${response.status}`,
-        details: responseText.substring(0, 200) // Show a snippet of what Gaana responded with
-      }, 500)
+        error: `Gaana blocked the request with Status ${response.status}`,
+        details: responseText.substring(0, 300) // Show why they blocked it
+      }, response.status)
     }
     
-    // 2. Safely parse the JSON
-    const data = JSON.parse(responseText)
-    const tracks = data.tracks && Array.isArray(data.tracks) ? data.tracks.slice(0, limit) : []
-
-    return c.json({ success: true, data: tracks })
+    try {
+      const data = JSON.parse(responseText)
+      const tracks = data.tracks && Array.isArray(data.tracks) ? data.tracks.slice(0, limit) : []
+      return c.json({ success: true, data: tracks })
+    } catch (parseError) {
+      return c.json({ 
+        success: false, 
+        error: 'Gaana did not return valid JSON',
+        details: responseText.substring(0, 300)
+      }, 500)
+    }
 
   } catch (error: any) {
-    // 3. THIS WILL NOW SHOW US THE EXACT ERROR!
+    // THIS WILL FINALLY SHOW US THE HIDDEN ERROR!
     return c.json({ 
       success: false, 
-      error: error.message || 'An unknown error occurred'
+      error: error.message || 'Network Fetch Error'
     }, 500)
   }
 })
 
+// 2. MUST BE HANDLED: Required for Hono on Vercel
 export default handle(app)
